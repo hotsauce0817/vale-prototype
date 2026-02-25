@@ -53,3 +53,23 @@ Patterns and mistakes captured across sessions. Claude reviews this at the start
 **Root cause:** The user-facing conversation and the API-facing conversation have different shapes. The user sees: AI message, observation card, user message. The API sees: assistant (full JSON), user (text). Mixing them corrupts both.
 
 **Rule:** Separate display state from API state. `messages` (useState) drives the UI. `apiMessagesRef` (useRef) drives the API. They are updated in parallel but have different shapes. useRef for API messages avoids stale closure issues in async callbacks.
+
+---
+
+### 2026-02 — `vercel dev` doesn't load `.env.local` for serverless functions
+
+**What happened:** Added Supabase logging with env vars in `prototype/.env.local`. The ANTHROPIC_API_KEY worked (Claude responded), but SUPABASE_URL and SUPABASE_ANON_KEY were undefined in the serverless function. Turns out ANTHROPIC_API_KEY only worked because it was set in the shell environment, not from the file.
+
+**Root cause:** `vercel dev` loads `.env` (and `.env.development.local` from `vercel env pull`) for serverless functions, but doesn't reliably load `.env.local`. This is a Vercel CLI quirk.
+
+**Rule:** For `vercel dev`, put env vars in `.env` (not `.env.local`). Both are excluded from git by the `.env*` pattern in `.gitignore`. Alternatively, use `vercel env pull` to download remote env vars to `.env.development.local`. When debugging env var issues, add `console.log("[Vale] VAR set:", !!process.env.VAR)` to verify what's actually available.
+
+---
+
+### 2026-02 — Fire-and-forget async doesn't work in serverless functions
+
+**What happened:** Supabase logging was fire-and-forget (no `await`). The insert call was made, then the response was returned immediately. Rows never appeared in Supabase.
+
+**Root cause:** Serverless functions (Vercel, AWS Lambda, etc.) freeze or terminate right after the response is sent. Any pending async work (Promises, setTimeout, etc.) that hasn't completed gets killed. Unlike a long-running server, there's no background process to finish the work.
+
+**Rule:** In serverless environments, `await` any async work before returning the response. Wrap in try/catch so failures don't break the main function. The ~50-100ms for a Supabase insert is negligible compared to the ~3-5s Claude API call that precedes it.

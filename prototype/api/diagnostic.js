@@ -121,9 +121,9 @@ export default async function handler(req, res) {
       diagnosis: clientResponse.diagnosis || clientResponse.state_update?.diagnosis || null,
     };
 
-    // Fire-and-forget: log this turn to Supabase
+    // Log this turn to Supabase (awaited — serverless functions terminate after response)
     const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-    logTurn({
+    await logTurn({
       sessionId: sessionId || "unknown",
       mode,
       turnNumber: state.conversation_turn || 0,
