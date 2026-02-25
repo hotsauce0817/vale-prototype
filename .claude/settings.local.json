@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(/opt/homebrew/bin/brew:*)",
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(curl:*)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(test:*)",
+      "Bash(git -C /Users/sahilgupta/projects/vale status)",
+      "Bash(git -C /Users/sahilgupta/projects/vale/prototype status)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh:*)",
+      "Bash(brew --version:*)",
+      "Bash(sudo cp:*)",
+      "Bash(~/bin/gh auth login:*)",
+      "Bash(~/bin/gh repo create vale-prototype --private --source=. --remote=origin --push)",
+      "Bash(npx vercel:*)",
+      "WebFetch(domain:tone-row.com)",
+      "Bash(npx vite build:*)",
+      "Bash(python3:*)",
+      "Bash(node test-rinka.mjs:*)",
+      "Bash(node test-rinka-diagnosis.mjs:*)",
+      "Bash(printf:*)",
+      "Bash(git config:*)",
+      "Bash(npm run build:*)",
+      "Bash(wc:*)",
+      "Bash(node -e:*)",
+      "Bash(git rm:*)"
+    ]
+  }
+}
