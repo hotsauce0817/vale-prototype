@@ -1,24 +1,38 @@
 import { useState, useEffect, useRef } from "react";
 import { T } from "../tokens.js";
 import { FadeIn, Badge, Btn, TopBar, ValeAvatar } from "../components/shared.jsx";
-import useDiagnosticChat from "../hooks/useDiagnosticChat.js";
-import { RINKA_RESPONSES } from "../data/rinka.js";
+import useAuditChat from "../hooks/useAuditChat.js";
+import { RINKA_AUDIT_RESPONSES } from "../data/rinkaAudit.js";
 
 /**
- * LiveIntake — the live AI diagnostic conversation.
+ * EquityAudit — the second AI conversation (post-diagnosis).
  *
+ * Same chat UI as LiveIntake. Specialized equity audit prompt.
  * Two modes:
  * - "rinka": Pre-selected response buttons (curated demo)
  * - "open": Free-text input (try it yourself)
  *
  * Props:
  *   mode: "rinka" | "open"
- *   entryContext: "equity" | "home" | "generic" (for open mode)
- *   onComplete: (diagnosis) => void
+ *   diagnosis: the intake diagnosis object (provides context for the audit)
+ *   intakeMessages: API messages from the intake (for context injection)
+ *   intakeState: final diagnostic state from intake
+ *   sessionId: session ID from the intake (for log continuity)
+ *   onComplete: ({ auditResult, sessionId }) => void
  *   onBack: () => void
  */
-export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
-  const { messages, isLoading, diagnosis, observationCount, diagnosticState, apiMessages, sessionId, startConversation, sendMessage } = useDiagnosticChat(mode, entryContext);
+export default function EquityAudit({ mode, diagnosis, intakeMessages, intakeState, sessionId: parentSessionId, onComplete, onBack }) {
+  // Build the diagnostic context that the audit prompt needs
+  const diagnosticContext = {
+    diagnosis,
+    state: intakeState,
+    messages: intakeMessages,
+  };
+
+  const {
+    messages, isLoading, auditResult, observationCount, auditState, apiMessages, sessionId, startConversation, sendMessage,
+  } = useAuditChat(mode, diagnosticContext);
+
   const [inputText, setInputText] = useState("");
   const [responseIndex, setResponseIndex] = useState(0);
   const bottomRef = useRef(null);
@@ -38,25 +52,20 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }, [messages, isLoading]);
 
-  // Handle diagnosis completion
-  useEffect(() => {
-    if (diagnosis) {
-      // Small delay so the user sees the "done" message
-    }
-  }, [diagnosis]);
-
   // Handle sending a message (open mode)
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || isLoading) return;
     setInputText("");
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = "auto";
     sendMessage(text);
   };
 
   // Handle choice selection (rinka mode)
   const handleChoice = (choiceIdx) => {
     if (isLoading) return;
-    const responseSet = RINKA_RESPONSES[responseIndex];
+    const responseSet = RINKA_AUDIT_RESPONSES[responseIndex];
     if (!responseSet) return;
     const text = responseSet.choices[responseSet.pick !== undefined ? responseSet.pick : choiceIdx];
     setResponseIndex((i) => i + 1);
@@ -65,14 +74,14 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
 
   // Only show choice buttons after a successful AI response (not after error fallback)
   const hasValidAIResponse = messages.some((m) => m.type === "ai" && !m.content.startsWith("Something went wrong"));
-  const showChoices = mode === "rinka" && !isLoading && responseIndex < RINKA_RESPONSES.length && !diagnosis && hasValidAIResponse;
+  const showChoices = mode === "rinka" && !isLoading && responseIndex < RINKA_AUDIT_RESPONSES.length && !auditResult && hasValidAIResponse;
   // Show text input in open mode, OR as fallback when Rinka runs out of scripted responses
-  const rinkaExhausted = mode === "rinka" && responseIndex >= RINKA_RESPONSES.length && !diagnosis && !isLoading;
-  const showInput = (mode === "open" || rinkaExhausted) && !diagnosis;
+  const rinkaExhausted = mode === "rinka" && responseIndex >= RINKA_AUDIT_RESPONSES.length && !auditResult && !isLoading;
+  const showInput = (mode === "open" || rinkaExhausted) && !auditResult;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
-      <TopBar left="VALE" right={mode === "rinka" ? "Demo: Rinka" : "Diagnostic Intake"} onBack={onBack} />
+      <TopBar left="VALE" right={mode === "rinka" ? "Demo: Rinka — Equity Audit" : "Equity Audit"} onBack={onBack} />
 
       {/* Message area */}
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px 260px" }}>
@@ -80,7 +89,7 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
           {/* Opening line */}
           <FadeIn delay={0}>
             <p style={{ fontFamily: T.serif, fontSize: "22px", fontWeight: 300, color: T.text, margin: "0 0 24px" }}>
-              {mode === "rinka" ? "Let's understand your situation, Rinka." : "Let's understand your situation."}
+              {mode === "rinka" ? "Let's dig into your equity, Rinka." : "Let's dig into your equity."}
             </p>
           </FadeIn>
 
@@ -91,14 +100,14 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
                 <FadeIn key={i} delay={0}>
                   <div style={{ textAlign: "center", padding: "32px 0" }}>
                     <p style={{ fontFamily: T.serif, fontSize: "17px", fontStyle: "italic", color: T.text, margin: "0 0 8px" }}>
-                      I've heard enough to show you something.
+                      I've finished the audit. Here's what I found.
                     </p>
                     {observationCount > 0 && (
                       <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.goldDim, margin: "0 0 20px" }}>
-                        {observationCount} observation{observationCount !== 1 ? "s" : ""} from this conversation
+                        {observationCount} observation{observationCount !== 1 ? "s" : ""} during this audit
                       </p>
                     )}
-                    <Btn primary onClick={() => onComplete({ diagnosis, messages: apiMessages.current, state: diagnosticState, sessionId })}>See what we found →</Btn>
+                    <Btn primary onClick={() => onComplete({ auditResult, sessionId: parentSessionId || sessionId })}>See the full analysis →</Btn>
                   </div>
                 </FadeIn>
               );
@@ -107,7 +116,7 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
             if (msg.type === "ai") {
               return (
                 <FadeIn key={i} delay={0}>
-                  {/* Observation card renders above the AI follow-up so the user reads the insight first */}
+                  {/* Observation card renders above the AI follow-up */}
                   {msg.observation && (
                     <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginLeft: "34px" }}>
                       <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative" }}>
@@ -178,14 +187,14 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
         </div>
       </div>
 
-      {/* Input area — fixed at bottom */}
-      {showChoices && responseIndex < RINKA_RESPONSES.length && (
+      {/* Rinka choice buttons — fixed at bottom */}
+      {showChoices && responseIndex < RINKA_AUDIT_RESPONSES.length && (
         <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: `linear-gradient(transparent, ${T.bg} 20%)`, padding: "40px 20px 24px" }}>
           <div style={{ maxWidth: "560px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "8px" }}>
-            {RINKA_RESPONSES[responseIndex].choices.map((c, ci) => (
+            {RINKA_AUDIT_RESPONSES[responseIndex].choices.map((c, ci) => (
               <button key={ci} onClick={() => handleChoice(ci)} style={{
-                background: ci === RINKA_RESPONSES[responseIndex].pick ? "rgba(200,164,86,0.08)" : T.surface,
-                border: `1px solid ${ci === RINKA_RESPONSES[responseIndex].pick ? "rgba(200,164,86,0.2)" : T.border}`,
+                background: ci === RINKA_AUDIT_RESPONSES[responseIndex].pick ? "rgba(200,164,86,0.08)" : T.surface,
+                border: `1px solid ${ci === RINKA_AUDIT_RESPONSES[responseIndex].pick ? "rgba(200,164,86,0.2)" : T.border}`,
                 borderRadius: "12px", padding: "14px 18px", cursor: "pointer", textAlign: "left", transition: "all 0.15s",
                 fontFamily: T.sans, fontSize: "13.5px", color: T.text, lineHeight: 1.5,
               }}>{c}</button>
@@ -194,6 +203,7 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
         </div>
       )}
 
+      {/* Free-text input — open mode or Rinka fallback */}
       {showInput && (
         <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: `linear-gradient(transparent, ${T.bg} 20%)`, padding: "40px 20px 24px" }}>
           <div style={{ maxWidth: "560px", margin: "0 auto" }}>
@@ -203,7 +213,6 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
                 value={inputText}
                 onChange={(e) => {
                   setInputText(e.target.value);
-                  // Auto-resize: reset height then set to scrollHeight
                   e.target.style.height = "auto";
                   e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
                 }}

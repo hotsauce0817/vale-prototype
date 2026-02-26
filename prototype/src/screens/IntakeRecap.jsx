@@ -10,7 +10,8 @@ export default function IntakeRecap({ data, diagnosis, onContinue, onBack }) {
   const diagnosed = Array.isArray(diagnosis?.diagnosed_gaps) ? diagnosis.diagnosed_gaps : (Array.isArray(data?.diagnosed) ? data.diagnosed : []);
   const crossDomainInsights = Array.isArray(diagnosis?.cross_domain_insights) ? diagnosis.cross_domain_insights : [];
   const scoreContext = typeof diagnosis?.score_context === "string" ? diagnosis.score_context : null;
-  const primaryMode = data?.primaryMode || diagnosis?.primaryMode || "financial-picture";
+  const primaryFinding = diagnosis?.primary_finding || null;
+  const involvesEquity = primaryFinding?.involves_equity === true;
 
   return <div style={{ minHeight: "100vh", background: T.bg }}>
     <TopBar left="VALE" right="Intake Complete" onBack={onBack} />
@@ -43,13 +44,12 @@ export default function IntakeRecap({ data, diagnosis, onContinue, onBack }) {
         <Badge color={T.gold}>WHAT WE NOTICED</Badge>
         <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "14px" }}>
           {diagnosed.map((d, i) => {
-            // Handle both string format (hardcoded) and object format (AI-generated)
             const isObject = typeof d === "object" && d !== null;
             const title = isObject ? d.title : null;
             const body = isObject ? d.body : d;
             const urgency = isObject ? d.urgency : null;
             return <div key={i} style={{ display: "flex", gap: "10px" }}>
-              <span style={{ color: urgency === "high" ? T.red : T.gold, fontSize: "8px", lineHeight: "22px", flexShrink: 0, marginTop: "2px" }}>◆</span>
+              <span style={{ color: urgency === "high" ? T.red : T.gold, fontSize: "8px", lineHeight: "22px", flexShrink: 0, marginTop: "2px" }}>&#9670;</span>
               <div>
                 {title && <span style={{ fontFamily: T.sans, fontSize: "13.5px", fontWeight: 500, color: T.text, lineHeight: 1.6, display: "block", marginBottom: "4px" }}>{title}</span>}
                 <span style={{ fontFamily: T.sans, fontSize: "13.5px", color: title ? T.textMid : T.text, lineHeight: 1.6 }}>{body}</span>
@@ -69,15 +69,43 @@ export default function IntakeRecap({ data, diagnosis, onContinue, onBack }) {
         </div>
       </Card></FadeIn>}
 
-      {/* Bottom CTA — unified forward navigation for both paths */}
-      <FadeIn delay={700}><div style={{ marginTop: "32px", padding: "24px", background: T.goldFaint, borderRadius: "14px", border: "1px solid rgba(200,164,86,0.15)" }}>
-        <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 8px" }}>
-          {primaryMode === "financial-picture" && "Based on your situation, we'd start by building your complete financial picture."}
-          {primaryMode === "decision-map" && "Based on your situation, there's a decision ahead that needs a coordinated plan."}
-          {primaryMode === "what-if" && "Based on your situation, let's start with the questions on your mind."}
-        </p>
-        <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: "0 0 20px" }}>You can explore all areas — this is where we'd recommend starting.</p>
-        <Btn primary onClick={onContinue}>Explore your focus areas →</Btn>
+      {/* The Opportunity — primary finding from diagnosis */}
+      {primaryFinding && <FadeIn delay={700}>
+        <div style={{ marginTop: "24px", padding: "24px", background: "rgba(200,164,86,0.04)", borderRadius: "14px", border: "1px solid rgba(200,164,86,0.15)" }}>
+          <Badge color={T.gold}>THE OPPORTUNITY</Badge>
+          <h2 style={{ fontFamily: T.serif, fontSize: "20px", fontWeight: 400, color: T.text, margin: "12px 0 8px", lineHeight: 1.4 }}>{primaryFinding.title}</h2>
+          <p style={{ fontFamily: T.sans, fontSize: "13.5px", color: T.textMid, lineHeight: 1.65, margin: "0 0 12px" }}>{primaryFinding.why_it_matters}</p>
+          {primaryFinding.what_audit_reveals && (
+            <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.textDim, lineHeight: 1.6, margin: 0, fontStyle: "italic" }}>{primaryFinding.what_audit_reveals}</p>
+          )}
+        </div>
+      </FadeIn>}
+
+      {/* Bottom CTA — conditional on whether primary finding involves equity */}
+      <FadeIn delay={800}><div style={{ marginTop: "24px", padding: "24px", background: T.goldFaint, borderRadius: "14px", border: "1px solid rgba(200,164,86,0.15)" }}>
+        {primaryFinding && involvesEquity ? (
+          <>
+            <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 4px" }}>
+              This is worth going deeper on.
+            </p>
+            <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: "0 0 20px" }}>Takes about 10 minutes. I'll ask specific questions about your equity compensation, tax exposure, and timing.</p>
+            <Btn primary onClick={onContinue}>Start equity audit &rarr;</Btn>
+          </>
+        ) : primaryFinding ? (
+          <>
+            <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 4px" }}>
+              This is where Vale goes deeper.
+            </p>
+            <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: 0 }}>Domain-specific audits are coming soon. For now, your diagnosis highlights the key areas to focus on.</p>
+          </>
+        ) : (
+          <>
+            <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 4px" }}>
+              Your diagnostic is complete.
+            </p>
+            <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: 0 }}>We've identified the key areas of your financial picture above. Deeper audits coming soon.</p>
+          </>
+        )}
       </div></FadeIn>
     </div>
   </div>;

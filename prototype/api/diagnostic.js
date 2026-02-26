@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { buildSystemPrompt } from "./_lib/systemPrompt.js";
+import { buildSystemPrompt, buildAuditPrompt } from "./_lib/systemPrompt.js";
 import { logTurn, logError } from "./_lib/log.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -28,22 +28,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { messages = [], state = {}, mode = "generic", sessionId } = req.body;
-    console.log("[Vale] sessionId received:", sessionId, "| body keys:", Object.keys(req.body || {}));
+    const { messages = [], state = {}, mode = "generic", sessionId, diagnosticContext } = req.body;
+    const isAudit = mode === "audit" || mode === "rinka_audit";
+    console.log("[Vale] sessionId:", sessionId, "| mode:", mode, "| audit:", isAudit);
 
-    // Build system prompt with mode context and current state
-    const systemPrompt = buildSystemPrompt(mode, state);
+    // Build system prompt — audit mode uses a different prompt builder
+    const systemPrompt = isAudit
+      ? buildAuditPrompt(mode, diagnosticContext, state)
+      : buildSystemPrompt(mode, state);
 
     // Build messages for Claude
     const claudeMessages = messages.length === 0
-      // First turn: send a minimal user message to get the AI's opening
-      ? [{ role: "user", content: "Begin the diagnostic intake conversation." }]
+      ? [{ role: "user", content: isAudit ? "Begin the equity audit conversation." : "Begin the diagnostic intake conversation." }]
       : messages;
 
-    // Call Claude — 2048 tokens gives room for message + observation + state_update + diagnosis
+    // Call Claude — audit needs more tokens for the audit_result
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
+      max_tokens: isAudit ? 4096 : 2048,
       system: systemPrompt,
       messages: claudeMessages,
     });
@@ -131,13 +133,17 @@ export default async function handler(req, res) {
     // Strip internal_reasoning before sending to client (useful for server-side debugging)
     const { internal_reasoning, ...clientResponse } = parsed;
 
-    // Ensure required fields exist
+    // Ensure required fields exist — handle both diagnostic and audit response shapes
     const result = {
       message: clientResponse.message || "",
       observation: clientResponse.observation || null,
       state_update: clientResponse.state_update || {},
+      // Diagnostic fields
       ready_for_diagnosis: clientResponse.ready_for_diagnosis || false,
       diagnosis: clientResponse.diagnosis || clientResponse.state_update?.diagnosis || null,
+      // Audit fields
+      ready_for_analysis: clientResponse.ready_for_analysis || false,
+      audit_result: clientResponse.audit_result || null,
     };
 
     // Log this turn to Supabase (awaited — serverless functions terminate after response)
@@ -150,8 +156,8 @@ export default async function handler(req, res) {
       aiResponse: result.message,
       observation: result.observation,
       state,
-      diagnosis: result.diagnosis,
-      completed: result.ready_for_diagnosis || false,
+      diagnosis: result.diagnosis || result.audit_result || null,
+      completed: result.ready_for_diagnosis || result.ready_for_analysis || false,
     });
 
     return res.status(200).json(result);

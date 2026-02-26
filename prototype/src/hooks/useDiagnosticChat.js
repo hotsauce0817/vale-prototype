@@ -301,6 +301,7 @@ export default function useDiagnosticChat(mode, entryContext) {
     observationCount,
     diagnosticState,
     apiMessages: apiMessagesRef,
+    sessionId: sessionIdRef.current,
     startConversation,
     sendMessage,
   };
