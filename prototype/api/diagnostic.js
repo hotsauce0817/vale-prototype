@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "./_lib/systemPrompt.js";
-import { logTurn } from "./_lib/log.js";
+import { logTurn, logError } from "./_lib/log.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -29,6 +29,7 @@ export default async function handler(req, res) {
 
   try {
     const { messages = [], state = {}, mode = "generic", sessionId } = req.body;
+    console.log("[Vale] sessionId received:", sessionId, "| body keys:", Object.keys(req.body || {}));
 
     // Build system prompt with mode context and current state
     const systemPrompt = buildSystemPrompt(mode, state);
@@ -89,6 +90,15 @@ export default async function handler(req, res) {
             }
             if (!parsed) {
               console.error("JSON parse failed after retry. Retry text:", retryText.slice(0, 500));
+              const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+              await logError({
+                sessionId: sessionId || "unknown",
+                mode,
+                turnNumber: state.conversation_turn || 0,
+                errorType: "json_parse_failed_after_retry",
+                rawResponse: (rawText || "").slice(0, 2000),
+                userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
+              });
               return res.status(200).json({
                 message: "I'm having a moment — let me try that again. Could you repeat what you just said?",
                 observation: null,
@@ -100,6 +110,15 @@ export default async function handler(req, res) {
         }
       } else {
         console.error("No JSON object found in response. Raw text:", rawText.slice(0, 500));
+        const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+        await logError({
+          sessionId: sessionId || "unknown",
+          mode,
+          turnNumber: state.conversation_turn || 0,
+          errorType: "no_json_in_response",
+          rawResponse: (rawText || "").slice(0, 2000),
+          userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
+        });
         return res.status(200).json({
           message: "I'm having a moment — let me try that again. Could you repeat what you just said?",
           observation: null,
@@ -138,6 +157,21 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (err) {
     console.error("Diagnostic API error:", err);
+
+    // Log the error to Supabase so we can track failure rates
+    const { messages: msgs = [], state: errState = {}, mode: errMode = "generic", sessionId: errSessionId } = req.body || {};
+    const lastUserMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    await logError({
+      sessionId: errSessionId || "unknown",
+      mode: errMode,
+      turnNumber: errState.conversation_turn || 0,
+      errorType: err.status === 401 ? "invalid_api_key"
+        : err.status === 429 ? "rate_limited"
+        : err.status ? `anthropic_error_${err.status}`
+        : "unhandled_exception",
+      rawResponse: (err.message || "").slice(0, 2000),
+      userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
+    });
 
     // Handle specific Anthropic errors
     if (err.status === 401) {

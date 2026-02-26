@@ -2,10 +2,22 @@ import { useState, useEffect } from "react";
 import { T } from "../tokens.js";
 import { FadeIn, Badge, Btn, Card, TopBar, ValeAvatar } from "../components/shared.jsx";
 
-export default function HumanHandoff({ data, onBack }) {
+export default function HumanHandoff({ data, postDiagnosisData, diagnosis, onBack }) {
   const [view, setView] = useState("user");
   const [step, setStep] = useState(0);
-  const ab = data.advisorBrief;
+
+  // Resolve data source — hardcoded profile or AI-generated
+  const d = data || postDiagnosisData;
+
+  // Derive safe values with fallbacks
+  const name = d?.name || diagnosis?.name || "there";
+  const partnerName = d?.partnerName || null;
+  const avatar = d?.avatar || name.charAt(0).toUpperCase();
+  const context = d?.context || "";
+  const primaryMode = d?.primaryMode || diagnosis?.primaryMode || "financial-picture";
+  const ab = d?.advisorBrief || null;
+  const diagnosed = d?.diagnosed
+    || (diagnosis?.diagnosed_gaps || []).map(g => typeof g === "string" ? g : (g.title || g.body || JSON.stringify(g)));
 
   useEffect(() => {
     if (step === 0) { const t = setTimeout(() => setStep(1), 2000); return () => clearTimeout(t); }
@@ -54,7 +66,7 @@ export default function HumanHandoff({ data, onBack }) {
             <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
               <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(129,178,154,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "2px" }}><span style={{ fontSize: "10px" }}>👤</span></div>
               <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "0 14px 14px 14px", padding: "14px 18px", maxWidth: "85%" }}>
-                <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, margin: "0 0 4px" }}>Hi {data.name} — I've reviewed everything from your intake. {data.primaryMode === "decision-map" ? `I can see the decision map we're building and want to make sure we're prioritizing the right things.` : data.primaryMode === "what-if" ? `I noticed some of the questions you've been exploring and I think I can help you think through a few of them.` : `I see the gaps we've identified in your financial picture. Let me help you figure out where to start.`}</p>
+                <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, margin: "0 0 4px" }}>Hi {name} — I've reviewed everything from your intake. {primaryMode === "decision-map" ? `I can see the decision map we're building and want to make sure we're prioritizing the right things.` : primaryMode === "what-if" ? `I noticed some of the questions you've been exploring and I think I can help you think through a few of them.` : `I see the gaps we've identified in your financial picture. Let me help you figure out where to start.`}</p>
                 <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.text, margin: 0 }}>What would be most helpful to talk through right now?</p>
               </div>
             </div>
@@ -69,45 +81,56 @@ export default function HumanHandoff({ data, onBack }) {
       {view === "advisor" && <>
         <FadeIn delay={0}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
-            <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: T.goldFaint, border: "1px solid rgba(200,164,86,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.sans, fontSize: "14px", fontWeight: 600, color: T.gold }}>{data.avatar}</div>
+            <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: T.goldFaint, border: "1px solid rgba(200,164,86,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.sans, fontSize: "14px", fontWeight: 600, color: T.gold }}>{avatar}</div>
             <div>
-              <div style={{ fontFamily: T.sans, fontSize: "16px", fontWeight: 500, color: T.text }}>{data.name}{data.partnerName && data.partnerName !== "Wife" ? ` & ${data.partnerName}` : ""}</div>
-              <div style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim }}>{data.context}</div>
+              <div style={{ fontFamily: T.sans, fontSize: "16px", fontWeight: 500, color: T.text }}>{name}{partnerName && partnerName !== "Wife" ? ` & ${partnerName}` : ""}</div>
+              <div style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim }}>{context}</div>
             </div>
           </div>
         </FadeIn>
-        <FadeIn delay={100}><Card style={{ marginBottom: "12px" }}>
-          <Badge>CLIENT SUMMARY</Badge>
-          <p style={{ fontFamily: T.sans, fontSize: "13.5px", color: T.text, lineHeight: 1.7, marginTop: "12px" }}>{ab.summary}</p>
-        </Card></FadeIn>
-        <FadeIn delay={200}><Card style={{ marginBottom: "12px", borderColor: "rgba(224,122,95,0.15)" }}>
-          <Badge color={T.red}>URGENT ITEMS</Badge>
-          <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            {ab.urgentItems.map((item, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
-              <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: T.red, flexShrink: 0, marginTop: "7px" }} />
-              <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.text, lineHeight: 1.6 }}>{item}</span>
-            </div>)}
-          </div>
-        </Card></FadeIn>
-        <FadeIn delay={300}><Card style={{ marginBottom: "12px", borderColor: "rgba(200,164,86,0.15)" }}>
-          <Badge color={T.gold}>RECOMMENDED TALKING POINTS</Badge>
-          <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
-            {ab.talkingPoints.map((tp, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
-              <span style={{ fontFamily: T.sans, fontSize: "11px", fontWeight: 700, color: T.gold, flexShrink: 0, marginTop: "2px" }}>{i + 1}</span>
-              <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.text, lineHeight: 1.6 }}>{tp}</span>
-            </div>)}
-          </div>
-        </Card></FadeIn>
-        <FadeIn delay={400}><Card style={{ marginBottom: "12px" }}>
-          <Badge color={T.blue}>CLIENT PERSONALITY & APPROACH</Badge>
-          <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, lineHeight: 1.7, marginTop: "12px" }}>{ab.personality}</p>
-        </Card></FadeIn>
-        <FadeIn delay={500}><Card>
+        {ab ? (
+          <>
+            <FadeIn delay={100}><Card style={{ marginBottom: "12px" }}>
+              <Badge>CLIENT SUMMARY</Badge>
+              <p style={{ fontFamily: T.sans, fontSize: "13.5px", color: T.text, lineHeight: 1.7, marginTop: "12px" }}>{ab.summary}</p>
+            </Card></FadeIn>
+            <FadeIn delay={200}><Card style={{ marginBottom: "12px", borderColor: "rgba(224,122,95,0.15)" }}>
+              <Badge color={T.red}>URGENT ITEMS</Badge>
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                {ab.urgentItems.map((item, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
+                  <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: T.red, flexShrink: 0, marginTop: "7px" }} />
+                  <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.text, lineHeight: 1.6 }}>{item}</span>
+                </div>)}
+              </div>
+            </Card></FadeIn>
+            <FadeIn delay={300}><Card style={{ marginBottom: "12px", borderColor: "rgba(200,164,86,0.15)" }}>
+              <Badge color={T.gold}>RECOMMENDED TALKING POINTS</Badge>
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                {ab.talkingPoints.map((tp, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
+                  <span style={{ fontFamily: T.sans, fontSize: "11px", fontWeight: 700, color: T.gold, flexShrink: 0, marginTop: "2px" }}>{i + 1}</span>
+                  <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.text, lineHeight: 1.6 }}>{tp}</span>
+                </div>)}
+              </div>
+            </Card></FadeIn>
+            <FadeIn delay={400}><Card style={{ marginBottom: "12px" }}>
+              <Badge color={T.blue}>CLIENT PERSONALITY & APPROACH</Badge>
+              <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, lineHeight: 1.7, marginTop: "12px" }}>{ab.personality}</p>
+            </Card></FadeIn>
+          </>
+        ) : (
+          <FadeIn delay={100}><Card style={{ marginBottom: "12px" }}>
+            <Badge>INTAKE SUMMARY</Badge>
+            <p style={{ fontFamily: T.sans, fontSize: "13.5px", color: T.textMid, lineHeight: 1.7, marginTop: "12px" }}>
+              Detailed advisor brief is still generating. Diagnosed needs from intake are available below.
+            </p>
+          </Card></FadeIn>
+        )}
+        <FadeIn delay={ab ? 500 : 200}><Card>
           <Badge color={T.textMid}>DIAGNOSED NEEDS FROM INTAKE</Badge>
           <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            {data.diagnosed.map((d, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
+            {diagnosed.map((item, i) => <div key={i} style={{ display: "flex", gap: "10px" }}>
               <span style={{ color: T.gold, fontSize: "8px", marginTop: "6px", flexShrink: 0 }}>◆</span>
-              <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, lineHeight: 1.6 }}>{d}</span>
+              <span style={{ fontFamily: T.sans, fontSize: "13px", color: T.textMid, lineHeight: 1.6 }}>{item}</span>
             </div>)}
           </div>
         </Card></FadeIn>

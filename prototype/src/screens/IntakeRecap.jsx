@@ -69,27 +69,15 @@ export default function IntakeRecap({ data, diagnosis, onContinue, onBack }) {
         </div>
       </Card></FadeIn>}
 
-      {/* Bottom CTA — different for AI path vs hardcoded */}
+      {/* Bottom CTA — unified forward navigation for both paths */}
       <FadeIn delay={700}><div style={{ marginTop: "32px", padding: "24px", background: T.goldFaint, borderRadius: "14px", border: "1px solid rgba(200,164,86,0.15)" }}>
-        {diagnosis ? (
-          <>
-            <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 8px" }}>
-              This is what a 10-minute intake surfaces. The full Vale experience goes deeper — coordinating across every domain, modeling scenarios, and executing the plan.
-            </p>
-            <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: "0 0 20px" }}>Try another scenario or run the demo again to see how it works.</p>
-            <Btn primary onClick={onContinue}>Start over →</Btn>
-          </>
-        ) : (
-          <>
-            <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 8px" }}>
-              {primaryMode === "financial-picture" && "Based on your situation, we'd start by building your complete financial picture."}
-              {primaryMode === "decision-map" && "Based on your situation, there's a decision ahead that needs a coordinated plan."}
-              {primaryMode === "what-if" && "Based on your situation, let's start with the questions on your mind."}
-            </p>
-            <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: "0 0 20px" }}>You can explore all areas — this is where we'd recommend starting.</p>
-            <Btn primary onClick={onContinue}>Explore your focus areas →</Btn>
-          </>
-        )}
+        <p style={{ fontFamily: T.serif, fontSize: "17px", fontWeight: 400, fontStyle: "italic", color: T.text, lineHeight: 1.5, margin: "0 0 8px" }}>
+          {primaryMode === "financial-picture" && "Based on your situation, we'd start by building your complete financial picture."}
+          {primaryMode === "decision-map" && "Based on your situation, there's a decision ahead that needs a coordinated plan."}
+          {primaryMode === "what-if" && "Based on your situation, let's start with the questions on your mind."}
+        </p>
+        <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, margin: "0 0 20px" }}>You can explore all areas — this is where we'd recommend starting.</p>
+        <Btn primary onClick={onContinue}>Explore your focus areas →</Btn>
       </div></FadeIn>
     </div>
   </div>;

@@ -21,6 +21,13 @@ export default function App() {
   const [entryContext, setEntryContext] = useState(null);
   // AI-generated diagnosis (populated by LiveIntake when ready)
   const [diagnosis, setDiagnosis] = useState(null);
+  // Stored intake context for post-diagnosis retry
+  const [intakeMessages, setIntakeMessages] = useState(null);
+  const [intakeState, setIntakeState] = useState(null);
+  // Post-diagnosis structured data for ModeExplorer + HumanHandoff
+  const [postDiagnosisData, setPostDiagnosisData] = useState(null);
+  const [postDiagnosisLoading, setPostDiagnosisLoading] = useState(false);
+  const [postDiagnosisError, setPostDiagnosisError] = useState(false);
 
   useEffect(() => {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = FONT_URL; document.head.appendChild(link);
@@ -39,8 +46,51 @@ export default function App() {
   // Open diagnostic path
   const handleOpen = (eventType) => { setFlowMode("open"); setEntryContext(eventType); setPhase("intake"); window.scrollTo(0, 0); };
 
+  // Fire post-diagnosis API in background
+  const firePostDiagnosis = (diag, msgs, finalState) => {
+    setPostDiagnosisLoading(true);
+    setPostDiagnosisError(false);
+
+    fetch("/api/post-diagnosis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: msgs,
+        diagnosis: diag,
+        state: finalState,
+        mode: flowMode === "rinka" ? "rinka" : (entryContext || "generic"),
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        console.log("[Vale] post-diagnosis data received:", data);
+        setPostDiagnosisData(data);
+        setPostDiagnosisLoading(false);
+      })
+      .catch((err) => {
+        console.error("[Vale] post-diagnosis failed:", err);
+        setPostDiagnosisLoading(false);
+        setPostDiagnosisError(true);
+      });
+  };
+
   // Back to entry
-  const handleBackToSelect = () => { setPhase("select"); setFlowMode(isDev ? "hardcoded" : null); setProfileKey(null); setDiagnosis(null); setEntryContext(null); window.scrollTo(0, 0); };
+  const handleBackToSelect = () => {
+    setPhase("select");
+    setFlowMode(isDev ? "hardcoded" : null);
+    setProfileKey(null);
+    setDiagnosis(null);
+    setIntakeMessages(null);
+    setIntakeState(null);
+    setPostDiagnosisData(null);
+    setPostDiagnosisLoading(false);
+    setPostDiagnosisError(false);
+    setEntryContext(null);
+    window.scrollTo(0, 0);
+  };
 
   /* ── SELECT phase ── */
   if (phase === "select") {
@@ -53,15 +103,20 @@ export default function App() {
     if (flowMode === "hardcoded") {
       return <DiagnosticIntake data={data} onComplete={go("recap")} onBack={handleBackToSelect} />;
     }
-    const handleDiagnosisComplete = (diag) => {
+    const handleDiagnosisComplete = ({ diagnosis: diag, messages: msgs, state: finalState }) => {
       console.log("[Vale] handleDiagnosisComplete called, diagnosis:", diag);
       if (!diag) {
         console.warn("[Vale] diagnosis was null/undefined — staying on intake");
         return;
       }
       setDiagnosis(diag);
+      setIntakeMessages(msgs);
+      setIntakeState(finalState);
       setPhase("recap");
       window.scrollTo(0, 0);
+
+      // Fire post-diagnosis in background
+      firePostDiagnosis(diag, msgs, finalState);
     };
     return <LiveIntake mode={flowMode === "rinka" ? "rinka" : "open"} entryContext={entryContext || "generic"} onComplete={handleDiagnosisComplete} onBack={handleBackToSelect} />;
   }
@@ -71,20 +126,40 @@ export default function App() {
     if (flowMode === "hardcoded") {
       return <IntakeRecap data={data} onContinue={go("modes")} onBack={go("intake")} />;
     }
-    // AI path: recap shows diagnosis, "Continue" goes back to start
-    return <IntakeRecap diagnosis={diagnosis} onContinue={handleBackToSelect} onBack={go("intake")} />;
+    // AI path: recap shows diagnosis, "Continue" goes forward to modes
+    return <IntakeRecap diagnosis={diagnosis} onContinue={go("modes")} onBack={go("intake")} />;
   }
 
-  /* ── MODES phase (hardcoded profiles only) ── */
+  /* ── MODES phase ── */
   if (phase === "modes") {
-    return <ModeExplorer data={data} onNext={go("return")} onBack={go("recap")} />;
+    if (flowMode === "hardcoded") {
+      return <ModeExplorer data={data} onNext={go("return")} onBack={go("recap")} />;
+    }
+    return <ModeExplorer
+      postDiagnosisData={postDiagnosisData}
+      loading={postDiagnosisLoading}
+      error={postDiagnosisError}
+      onRetry={() => firePostDiagnosis(diagnosis, intakeMessages, intakeState)}
+      diagnosis={diagnosis}
+      onNext={go("human")}
+      onBack={go("recap")}
+    />;
   }
 
   /* ── RETURN phase (hardcoded profiles only) ── */
   if (phase === "return") return <ReturnExperience data={data} onBack={go("modes")} onHuman={go("human")} />;
 
-  /* ── HUMAN phase (hardcoded profiles only) ── */
-  if (phase === "human") return <HumanHandoff data={data} onBack={go("return")} />;
+  /* ── HUMAN phase ── */
+  if (phase === "human") {
+    if (flowMode === "hardcoded") {
+      return <HumanHandoff data={data} onBack={go("return")} />;
+    }
+    return <HumanHandoff
+      postDiagnosisData={postDiagnosisData}
+      diagnosis={diagnosis}
+      onBack={go("modes")}
+    />;
+  }
 
   return null;
 }

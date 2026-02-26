@@ -6,6 +6,33 @@ const supabase =
     : null;
 
 /**
+ * Log a diagnostic error to Supabase.
+ * Called when the API fails to produce a valid response — JSON parse failures,
+ * timeouts, Anthropic API errors, etc.
+ */
+export async function logError({ sessionId, mode, turnNumber, errorType, rawResponse, userMessage }) {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase
+      .from("diagnostic_errors")
+      .insert({
+        session_id: sessionId,
+        mode,
+        turn_number: turnNumber,
+        error_type: errorType,
+        raw_response: rawResponse || null,
+        user_message: userMessage || null,
+      });
+
+    if (error) console.error("[Vale] Error log insert failed:", error.message);
+  } catch (err) {
+    // Never let logging break the diagnostic
+    console.error("[Vale] Error log error:", err.message);
+  }
+}
+
+/**
  * Log a single diagnostic turn to Supabase.
  * Awaitable — in serverless environments, we need to wait for the insert
  * to complete before the function terminates.

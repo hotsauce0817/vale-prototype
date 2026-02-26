@@ -1,17 +1,67 @@
 import { useState } from "react";
 import { T } from "../tokens.js";
-import { FadeIn, Badge, Pill, Btn, TopBar, ValeAvatar } from "../components/shared.jsx";
+import { FadeIn, Badge, Pill, Btn, Card, TopBar, ValeAvatar } from "../components/shared.jsx";
 
-export default function ModeExplorer({ data, onNext, onBack }) {
-  const [mode, setMode] = useState(data.primaryMode);
+export default function ModeExplorer({ data, postDiagnosisData, loading, error, onRetry, diagnosis, onNext, onBack }) {
+  const d = data || postDiagnosisData;
+
+  // Loading state — post-diagnosis still in progress
+  if (!d && loading) {
+    return <div style={{ minHeight: "100vh", background: T.bg }}>
+      <TopBar left="VALE" right="Building your plan" onBack={onBack} />
+      <div style={{ maxWidth: "600px", margin: "0 auto", padding: "80px 20px", textAlign: "center" }}>
+        <FadeIn delay={0}>
+          <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: T.goldFaint, border: "1px solid rgba(200,164,86,0.2)", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "12px", height: "12px", borderRadius: "50%", border: `2px solid ${T.gold}`, borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <h2 style={{ fontFamily: T.serif, fontSize: "22px", fontWeight: 300, color: T.text, margin: "0 0 12px" }}>
+            Building your plan...
+          </h2>
+          <p style={{ fontFamily: T.sans, fontSize: "14px", color: T.textMid }}>
+            This takes a few seconds
+          </p>
+        </FadeIn>
+      </div>
+    </div>;
+  }
+
+  // Error state — post-diagnosis failed
+  if (!d && error) {
+    return <div style={{ minHeight: "100vh", background: T.bg }}>
+      <TopBar left="VALE" right="Something went wrong" onBack={onBack} />
+      <div style={{ maxWidth: "600px", margin: "0 auto", padding: "80px 20px", textAlign: "center" }}>
+        <FadeIn delay={0}>
+          <h2 style={{ fontFamily: T.serif, fontSize: "22px", fontWeight: 300, color: T.text, margin: "0 0 12px" }}>
+            We hit a snag generating your plan
+          </h2>
+          <p style={{ fontFamily: T.sans, fontSize: "14px", color: T.textMid, marginBottom: "20px" }}>
+            The AI took too long or returned something unexpected. This happens occasionally.
+          </p>
+          {onRetry && <Btn primary onClick={onRetry}>Try again</Btn>}
+        </FadeIn>
+      </div>
+    </div>;
+  }
+
+  // No data at all (shouldn't happen)
+  if (!d) return null;
+
+  // Normal rendering — works for both hardcoded and AI data
+  return <ModeExplorerContent d={d} onNext={onNext} onBack={onBack} />;
+}
+
+function ModeExplorerContent({ d, onNext, onBack }) {
+  const [mode, setMode] = useState(d.primaryMode || "financial-picture");
   const [exp, setExp] = useState(null);
-  const modeData = data.modes[mode];
+  const modeData = d.modes[mode];
   const ml = { "financial-picture": "Financial Picture", "decision-map": "Decision Map", "what-if": "What If" };
+
   return <div style={{ minHeight: "100vh", background: T.bg }}>
-    <TopBar left="VALE" right={`${data.name}'s focus areas`} onBack={onBack} />
+    <TopBar left="VALE" right={`${d.name || "Your"}'s focus areas`} onBack={onBack} />
     <div style={{ maxWidth: "640px", margin: "0 auto", padding: "24px 20px 140px" }}>
       <div style={{ display: "flex", gap: "8px", marginBottom: "28px", flexWrap: "wrap" }}>
-        {Object.keys(ml).map(m => <Pill key={m} active={mode === m} onClick={() => { setMode(m); setExp(null); }}>{ml[m]}{m === data.primaryMode ? " ★" : ""}</Pill>)}
+        {Object.keys(ml).map(m => <Pill key={m} active={mode === m} onClick={() => { setMode(m); setExp(null); }}>{ml[m]}{m === d.primaryMode ? " ★" : ""}</Pill>)}
       </div>
       <FadeIn key={mode} delay={0}>
         <h2 style={{ fontFamily: T.serif, fontSize: "28px", fontWeight: 300, color: T.text, margin: "0 0 8px" }}>{modeData.title}</h2>
@@ -71,8 +121,8 @@ export default function ModeExplorer({ data, onNext, onBack }) {
         </div></FadeIn>;
       })}
       <FadeIn delay={300}><div style={{ marginTop: "32px", textAlign: "center" }}>
-        <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, marginBottom: "12px" }}>See what {data.name} would see on Day 2 →</p>
-        <Btn primary onClick={onNext}>View return experience</Btn>
+        <p style={{ fontFamily: T.sans, fontSize: "12px", color: T.textDim, marginBottom: "12px" }}>Ready to talk to a real person? →</p>
+        <Btn primary onClick={onNext}>Talk to your advisor</Btn>
       </div></FadeIn>
     </div>
     {/* Floating AI */}

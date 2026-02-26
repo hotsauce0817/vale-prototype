@@ -18,7 +18,7 @@ import { RINKA_RESPONSES } from "../data/rinka.js";
  *   onBack: () => void
  */
 export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
-  const { messages, isLoading, diagnosis, observationCount, startConversation, sendMessage } = useDiagnosticChat(mode, entryContext);
+  const { messages, isLoading, diagnosis, observationCount, diagnosticState, apiMessages, startConversation, sendMessage } = useDiagnosticChat(mode, entryContext);
   const [inputText, setInputText] = useState("");
   const [responseIndex, setResponseIndex] = useState(0);
   const bottomRef = useRef(null);
@@ -66,8 +66,9 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
   // Only show choice buttons after a successful AI response (not after error fallback)
   const hasValidAIResponse = messages.some((m) => m.type === "ai" && !m.content.startsWith("Something went wrong"));
   const showChoices = mode === "rinka" && !isLoading && responseIndex < RINKA_RESPONSES.length && !diagnosis && hasValidAIResponse;
-  // Should we show text input? (open mode, not done)
-  const showInput = mode === "open" && !diagnosis;
+  // Show text input in open mode, OR as fallback when Rinka runs out of scripted responses
+  const rinkaExhausted = mode === "rinka" && responseIndex >= RINKA_RESPONSES.length && !diagnosis && !isLoading;
+  const showInput = (mode === "open" || rinkaExhausted) && !diagnosis;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
@@ -97,7 +98,7 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
                         {observationCount} observation{observationCount !== 1 ? "s" : ""} from this conversation
                       </p>
                     )}
-                    <Btn primary onClick={() => onComplete(diagnosis)}>See what we found →</Btn>
+                    <Btn primary onClick={() => onComplete({ diagnosis, messages: apiMessages.current, state: diagnosticState })}>See what we found →</Btn>
                   </div>
                 </FadeIn>
               );
@@ -106,6 +107,15 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
             if (msg.type === "ai") {
               return (
                 <FadeIn key={i} delay={0}>
+                  {/* Observation card renders above the AI follow-up so the user reads the insight first */}
+                  {msg.observation && (
+                    <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginLeft: "34px" }}>
+                      <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative" }}>
+                        <Badge color={T.gold}>OBSERVATION</Badge>
+                        <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.goldLight, lineHeight: 1.65, margin: "8px 0 0" }}>{msg.observation}</p>
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: "10px", marginBottom: "16px", alignItems: "flex-start" }}>
                     <ValeAvatar size={24} />
                     <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "0 14px 14px 14px", padding: "14px 18px", maxWidth: "85%" }}>

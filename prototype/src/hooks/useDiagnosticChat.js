@@ -180,15 +180,22 @@ export default function useDiagnosticChat(mode, entryContext) {
   const processResponse = useCallback(async (apiResponse, currentState) => {
     const newMessages = [];
 
-    // Add observation first so the user reads the insight before the next question
-    if (apiResponse.observation) {
-      newMessages.push({ type: "observation", content: apiResponse.observation.text });
+    // Extract observation text (handle both object and string formats from API)
+    const obsText = apiResponse.observation
+      ? (typeof apiResponse.observation === "string" ? apiResponse.observation : apiResponse.observation.text)
+      : null;
+
+    if (obsText) {
       setObservationCount((c) => c + 1);
     }
 
-    // Then add AI message (the next question)
+    // Attach observation directly to the AI message so they render as one unit.
+    // This guarantees the observation card always appears above the follow-up question.
     if (apiResponse.message) {
-      newMessages.push({ type: "ai", content: apiResponse.message });
+      newMessages.push({ type: "ai", content: apiResponse.message, observation: obsText || null });
+    } else if (obsText) {
+      // Observation without a message (rare) — render standalone
+      newMessages.push({ type: "observation", content: obsText });
     }
 
     setMessages((prev) => [...prev, ...newMessages]);
@@ -292,6 +299,8 @@ export default function useDiagnosticChat(mode, entryContext) {
     isLoading,
     diagnosis,
     observationCount,
+    diagnosticState,
+    apiMessages: apiMessagesRef,
     startConversation,
     sendMessage,
   };

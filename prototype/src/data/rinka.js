@@ -88,4 +88,20 @@ export const RINKA_RESPONSES = [
     ],
     pick: 2,
   },
+  {
+    choices: [
+      "I have a 401k through work but that's it",
+      "Just a savings account",
+      "I haven't set anything up yet",
+    ],
+    pick: 0,
+  },
+  {
+    choices: [
+      "No, nothing like that",
+      "I think I have basic life insurance through work",
+      "I've been meaning to look into it",
+    ],
+    pick: 0,
+  },
 ];
