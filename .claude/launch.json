@@ -4,7 +4,7 @@
     {
       "name": "vale-prototype",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd /Users/sahilgupta/projects/vale/prototype && npm run dev"],
+      "runtimeArgs": ["-c", "cd /Users/sahilgupta/projects/vale-prototype/prototype && npm run dev"],
       "port": 5173
     }
   ]

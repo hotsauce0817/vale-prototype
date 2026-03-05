@@ -8,23 +8,77 @@ import IntakeRecap from "./screens/IntakeRecap.jsx";
 import LiveIntake from "./screens/LiveIntake.jsx";
 import EquityAudit from "./screens/EquityAudit.jsx";
 import EquityAnalysis from "./screens/EquityAnalysis.jsx";
+import DiagnosisTransition from "./screens/DiagnosisTransition.jsx";
 
 const params = new URLSearchParams(window.location.search);
 const isDev = params.has("dev");
 const isRinkaDemo = params.get("demo") === "rinka";
 const isTestAnalysis = params.get("test") === "analysis";
+const isTestTransition = params.get("test") === "transition";
 
 export default function App() {
   // If ?demo=rinka, skip entry and go straight to intake
   // If ?test=analysis, skip everything and show analysis with mock data
-  const [phase, setPhase] = useState(isTestAnalysis ? "analysis" : isRinkaDemo ? "intake" : "select");
+  const [phase, setPhase] = useState(isTestTransition ? "transition" : isTestAnalysis ? "analysis" : isRinkaDemo ? "intake" : "select");
   const [profileKey, setProfileKey] = useState(null);
   // "rinka" | "open" | "hardcoded" — determines which flow we're in
   const [flowMode, setFlowMode] = useState(
     isRinkaDemo ? "rinka" : isDev ? "hardcoded" : null
   );
   // AI-generated diagnosis (populated by LiveIntake when ready)
-  const [diagnosis, setDiagnosis] = useState(null);
+  const [diagnosis, setDiagnosis] = useState(() => {
+    if (!isTestTransition) return null;
+    // Mock diagnosis for visual testing (?test=transition)
+    return {
+      name: "Alex",
+      context: "42,000 shares across ISOs and NSOs, acquisition closing in 47 days",
+      expressed_needs: [
+        "Know whether to exercise ISOs before acquisition closes",
+        "Understand the tax hit either way",
+        "Set up 529 for baby",
+        "Get life insurance and will in place",
+      ],
+      diagnosed_gaps: [
+        {
+          title: "You're using TurboTax to handle a potential $650K tax event",
+          explanation: "With your household income and this ISO situation, you could face a massive AMT liability that TurboTax won't catch until it's too late. The exercise timing decision could swing this by tens of thousands.",
+          domains: ["tax", "equity"],
+          dollar_estimate: "$32K-47K potential AMT exposure",
+          urgency: "critical",
+        },
+        {
+          title: "No coordination across your financial picture",
+          explanation: "You have $80K earning nothing, $100K in a 401k, and potentially $650K in ISO gains, but no strategy connecting them.",
+          domains: ["tax", "equity", "investing"],
+          dollar_estimate: null,
+          urgency: "high",
+        },
+        {
+          title: "Your estate planning gap just became expensive to ignore",
+          explanation: "With a potential equity windfall and a new dependent, you have real assets to protect and someone who depends on you financially. No will, no life insurance review, no beneficiary designations.",
+          domains: ["estate", "insurance"],
+          dollar_estimate: null,
+          urgency: "high",
+        },
+      ],
+      cross_domain_insights: [
+        "Your ISO exercise decision directly determines your AMT exposure, which affects how much cash you'll have available for the baby's 529 and emergency reserves.",
+        "The estate planning gap becomes urgent specifically because of the equity event — you're about to have real assets with no protection structure in place.",
+      ],
+      primary_finding: {
+        title: "$650K ISO decision with 3-month deadline, no tax modeling",
+        explanation: "This isn't just money left on the table — it's potentially a five or six-figure tax mistake waiting to happen.",
+        involves_equity: true,
+        dollar_estimate: "$32K-47K in potential tax optimization",
+        cta_text: "Let's model your scenarios",
+        time_estimate: "~10 minutes",
+      },
+      score_context: "Alex scored himself a 5 and said he'd feel more in control if he actually knew whether to exercise his ISOs and understood the tax implications.",
+      headline: "Alex, you're making a $650K decision with no professional guidance, and the clock is ticking.",
+      total_optimization: "$47,000+",
+      domains_impacted: ["tax", "equity", "estate", "insurance"],
+    };
+  });
   // Stored intake context for the audit
   const [intakeMessages, setIntakeMessages] = useState(null);
   const [intakeState, setIntakeState] = useState(null);
@@ -129,10 +183,18 @@ export default function App() {
       setIntakeMessages(msgs);
       setIntakeState(finalState);
       setSessionId(sid);
-      setPhase("recap");
+      setPhase("transition");
       window.scrollTo(0, 0);
     };
     return <LiveIntake mode={flowMode === "rinka" ? "rinka" : "open"} entryContext="generic" onComplete={handleDiagnosisComplete} onBack={handleBackToSelect} />;
+  }
+
+  /* ── TRANSITION phase ── */
+  if (phase === "transition") {
+    return <DiagnosisTransition
+      diagnosis={diagnosis}
+      onComplete={() => { setPhase("recap"); window.scrollTo(0, 0); }}
+    />;
   }
 
   /* ── RECAP phase ── */

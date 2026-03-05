@@ -106,32 +106,36 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
 
             if (msg.type === "ai") {
               return (
-                <FadeIn key={i} delay={0}>
+                <div key={i}>
                   {/* Observation card renders above the AI follow-up so the user reads the insight first */}
                   {msg.observation && (
-                    <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginLeft: "34px" }}>
-                      <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative" }}>
-                        <Badge color={T.gold}>OBSERVATION</Badge>
-                        <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.goldLight, lineHeight: 1.65, margin: "8px 0 0" }}>{msg.observation}</p>
+                    <FadeIn delay={0} y={10}>
+                      <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginLeft: "34px" }}>
+                        <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative", animation: "obsBorderPulse 2s ease-in-out" }}>
+                          <Badge color={T.gold}>✦ OBSERVATION</Badge>
+                          <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.goldLight, lineHeight: 1.65, margin: "8px 0 0" }}>{msg.observation}</p>
+                        </div>
+                      </div>
+                    </FadeIn>
+                  )}
+                  <FadeIn delay={msg.observation ? 600 : 0}>
+                    <div style={{ display: "flex", gap: "10px", marginBottom: "16px", alignItems: "flex-start" }}>
+                      <ValeAvatar size={24} />
+                      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "0 14px 14px 14px", padding: "14px 18px", maxWidth: "85%" }}>
+                        <p style={{ fontFamily: T.sans, fontSize: "14px", color: T.text, lineHeight: 1.65, margin: 0 }}>{msg.content}</p>
                       </div>
                     </div>
-                  )}
-                  <div style={{ display: "flex", gap: "10px", marginBottom: "16px", alignItems: "flex-start" }}>
-                    <ValeAvatar size={24} />
-                    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "0 14px 14px 14px", padding: "14px 18px", maxWidth: "85%" }}>
-                      <p style={{ fontFamily: T.sans, fontSize: "14px", color: T.text, lineHeight: 1.65, margin: 0 }}>{msg.content}</p>
-                    </div>
-                  </div>
-                </FadeIn>
+                  </FadeIn>
+                </div>
               );
             }
 
             if (msg.type === "observation") {
               return (
-                <FadeIn key={i} delay={0}>
+                <FadeIn key={i} delay={500} y={10}>
                   <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginLeft: "34px" }}>
-                    <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative" }}>
-                      <Badge color={T.gold}>OBSERVATION</Badge>
+                    <div style={{ background: "rgba(200,164,86,0.06)", border: "1px solid rgba(200,164,86,0.15)", borderRadius: "12px", padding: "14px 18px", maxWidth: "85%", position: "relative", animation: "obsBorderPulse 2s ease-in-out" }}>
+                      <Badge color={T.gold}>✦ OBSERVATION</Badge>
                       <p style={{ fontFamily: T.sans, fontSize: "13px", color: T.goldLight, lineHeight: 1.65, margin: "8px 0 0" }}>{msg.content}</p>
                     </div>
                   </div>
@@ -168,7 +172,10 @@ export default function LiveIntake({ mode, entryContext, onComplete, onBack }) {
                       }} />
                     ))}
                   </div>
-                  <style>{`@keyframes typingDot { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }`}</style>
+                  <style>{`
+                    @keyframes typingDot { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+                    @keyframes obsBorderPulse { 0% { border-color: rgba(200,164,86,0.15); } 40% { border-color: rgba(200,164,86,0.5); } 100% { border-color: rgba(200,164,86,0.15); } }
+                  `}</style>
                 </div>
               </div>
             </FadeIn>
