@@ -1,3 +1,21 @@
+/**
+ * Supabase logging for diagnostic sessions.
+ *
+ * Two tables in Supabase:
+ *   diagnostic_turns  — one row per conversation turn (user message + AI response + state)
+ *   diagnostic_errors — one row per API failure (Anthropic errors, parse failures, etc.)
+ *
+ * IMPORTANT: Both functions use `await` on inserts. In serverless (Vercel),
+ * the function freezes after returning the response — any pending async work
+ * gets killed. Fire-and-forget (no await) means rows never appear in Supabase.
+ * See lessons.md: "Fire-and-forget async doesn't work in serverless functions."
+ *
+ * Both functions are wrapped in try/catch so logging failures never break the
+ * diagnostic itself. A failed log is silent (console.error only).
+ *
+ * If SUPABASE_URL or SUPABASE_ANON_KEY are missing (local dev without env vars),
+ * both functions silently no-op — the diagnostic works fine without logging.
+ */
 import { createClient } from "@supabase/supabase-js";
 
 const supabase =

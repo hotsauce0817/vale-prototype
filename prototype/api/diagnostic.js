@@ -1,192 +1,231 @@
+/**
+ * POST /api/diagnostic — Intake conversation endpoint.
+ *
+ * This is the core API handler for Vale's diagnostic intake. Each call:
+ *   1. Reconstructs Claude-compatible messages from the frontend's rawHistory
+ *   2. Calls Claude with extended thinking (single API call, no tool-use loop)
+ *   3. Parses the JSON envelope response
+ *   4. Returns structured response: text message + observation + closing
+ *
+ * KEY ARCHITECTURE DECISION: JSON envelope + extended thinking
+ *   Claude returns a single JSON object with message, map_updates, observation, closing.
+ *   Extended thinking provides structural separation (analysis in thinking block,
+ *   conversation in JSON message field) without the multi-round latency of tool calling.
+ *   See lessons.md for why we moved away from tool calling.
+ */
 import Anthropic from "@anthropic-ai/sdk";
-import { buildSystemPrompt, buildAuditPrompt } from "./_lib/systemPrompt.js";
+import { buildSystemPrompt } from "./_lib/systemPrompt.js";
 import { logTurn, logError } from "./_lib/log.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// ── JSON parsing ──
+
+/**
+ * Parse Claude's JSON envelope response from the content blocks.
+ * Returns the parsed object, or null if parsing fails.
+ */
+function parseEnvelope(content) {
+  const rawText = content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+
+  const clean = rawText
+    .replace(/^```(?:json)?\s*/m, "")
+    .replace(/\s*```$/m, "")
+    .trim();
+
+  // Attempt 1: direct parse
+  try {
+    return { parsed: JSON.parse(clean), rawText };
+  } catch (_) {}
+
+  // Attempt 2: extract outermost JSON object
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      return { parsed: JSON.parse(match[0]), rawText };
+    } catch (_) {}
+  }
+
+  return { parsed: null, rawText };
+}
+
+// ── Message reconstruction ──
+
+/**
+ * Reconstruct Claude-compatible messages from raw conversation history.
+ *
+ * rawHistory is an array of { role, content } where:
+ *   - assistant entries have content as an array of blocks (thinking + text)
+ *   - user entries have content as a plain string
+ *
+ * With JSON envelope (no tools), this is straightforward — just pass through.
+ * Thinking blocks must be preserved per Anthropic API requirements.
+ */
+function reconstructMessages(rawHistory, userMessage) {
+  const messages = [
+    { role: "user", content: "Begin the diagnostic intake conversation." },
+  ];
+
+  for (const entry of rawHistory || []) {
+    messages.push({ role: entry.role, content: entry.content });
+  }
+
+  if (userMessage) {
+    messages.push({ role: "user", content: userMessage });
+  }
+
+  return messages;
+}
+
+// ── API handler ──
 
 /**
  * POST /api/diagnostic
  *
  * Request body:
  * {
- *   messages: [{ role: "user"|"assistant", content: "..." }],
- *   state: { user: {}, domains: {}, ... },
- *   mode: "rinka" | "equity" | "home" | "generic"
+ *   rawHistory: [{ role, content }],  // conversation history
+ *   userMessage: string | null,        // new user message (null for opening)
+ *   sessionId: string
  * }
  *
- * Returns parsed JSON from Claude's diagnostic response.
+ * Returns:
+ * {
+ *   message: string,                   // text for the chat
+ *   observation: object | null,        // observation card data (text, summary, domains)
+ *   closing: object | null,            // intake closing signal
+ *   _raw_content: [...],               // full content array for history
+ * }
  */
 export default async function handler(req, res) {
-  // Only allow POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Check API key
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
   try {
-    const { messages = [], state = {}, mode = "generic", sessionId, diagnosticContext } = req.body;
-    const isAudit = mode === "audit" || mode === "rinka_audit";
-    console.log("[Vale] sessionId:", sessionId, "| mode:", mode, "| audit:", isAudit);
+    const { rawHistory = [], userMessage = null, sessionId } = req.body;
 
-    // Build system prompt — audit mode uses a different prompt builder
-    const systemPrompt = isAudit
-      ? buildAuditPrompt(mode, diagnosticContext, state)
-      : buildSystemPrompt(mode, state);
+    const systemPrompt = buildSystemPrompt();
+    const claudeMessages = reconstructMessages(rawHistory, userMessage);
 
-    // Build messages for Claude
-    const claudeMessages = messages.length === 0
-      ? [{ role: "user", content: isAudit ? "Begin the equity audit conversation." : "Begin the diagnostic intake conversation." }]
-      : messages;
-
-    // Call Claude — audit needs more tokens for the audit_result
+    // Single API call with extended thinking — no tool-use loop.
+    // Claude returns a JSON envelope in the text block, analysis in the thinking block.
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: isAudit ? 4096 : 2048,
+      max_tokens: 2048,
       system: systemPrompt,
       messages: claudeMessages,
+      thinking: { type: "enabled", budget_tokens: 1024 },
     });
 
-    // Extract text content from Claude's response
-    const rawText = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("");
+    // Parse JSON envelope from the text response
+    const { parsed, rawText } = parseEnvelope(response.content);
 
-    // Try to parse JSON — strip markdown fences if present
-    let parsed;
-    const cleanText = rawText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
-    try {
-      parsed = JSON.parse(cleanText);
-    } catch (parseErr) {
-      // If that fails, try to extract the outermost JSON object
-      const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsed = JSON.parse(jsonMatch[0]);
-        } catch {
-          console.error("JSON parse failed after extraction. Raw text:", rawText.slice(0, 500));
-          // Retry with stronger instruction
-          const retryResponse = await client.messages.create({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2048,
-            system: systemPrompt + "\n\nCRITICAL: Your previous response was not valid JSON. You MUST respond with ONLY a valid JSON object. No markdown, no code fences, no explanation outside the JSON.",
-            messages: claudeMessages,
-          });
+    // Extract thinking for logging
+    const thinkingText = response.content
+      .filter((b) => b.type === "thinking")
+      .map((b) => b.thinking)
+      .join("\n");
+    const reasoning = thinkingText ? { thinking: thinkingText } : null;
 
-          const retryText = retryResponse.content
-            .filter((block) => block.type === "text")
-            .map((block) => block.text)
-            .join("");
+    // Graceful fallback if JSON parsing fails
+    if (!parsed) {
+      console.error("JSON parse failed. Raw text:", rawText.slice(0, 500));
 
-          const retryClean = retryText.replace(/^```(?:json)?\s*/m, "").replace(/\s*```$/m, "").trim();
-          try {
-            parsed = JSON.parse(retryClean);
-          } catch {
-            const retryMatch = retryClean.match(/\{[\s\S]*\}/);
-            if (retryMatch) {
-              try { parsed = JSON.parse(retryMatch[0]); } catch { /* fall through */ }
-            }
-            if (!parsed) {
-              console.error("JSON parse failed after retry. Retry text:", retryText.slice(0, 500));
-              const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-              await logError({
-                sessionId: sessionId || "unknown",
-                mode,
-                turnNumber: state.conversation_turn || 0,
-                errorType: "json_parse_failed_after_retry",
-                rawResponse: (rawText || "").slice(0, 2000),
-                userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
-              });
-              return res.status(200).json({
-                message: "I'm having a moment — let me try that again. Could you repeat what you just said?",
-                observation: null,
-                state_update: {},
-                ready_for_diagnosis: false,
-              });
-            }
-          }
-        }
-      } else {
-        console.error("No JSON object found in response. Raw text:", rawText.slice(0, 500));
-        const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-        await logError({
-          sessionId: sessionId || "unknown",
-          mode,
-          turnNumber: state.conversation_turn || 0,
-          errorType: "no_json_in_response",
-          rawResponse: (rawText || "").slice(0, 2000),
-          userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
-        });
-        return res.status(200).json({
-          message: "I'm having a moment — let me try that again. Could you repeat what you just said?",
-          observation: null,
-          state_update: {},
-          ready_for_diagnosis: false,
-        });
-      }
+      const turnNumber = (rawHistory || []).filter(
+        (e) => e.role === "user"
+      ).length;
+      await logError({
+        sessionId: sessionId || "unknown",
+        mode: "intake",
+        turnNumber,
+        errorType: "json_parse_failed",
+        rawResponse: rawText.slice(0, 2000),
+        userMessage: userMessage || "[opening]",
+      });
+
+      // Return raw text as the message so the conversation isn't broken
+      return res.status(200).json({
+        message:
+          rawText ||
+          "I had trouble organizing my thoughts. Could you say that again?",
+        observation: null,
+        closing: null,
+        _raw_content: response.content,
+      });
     }
 
-    // Strip internal_reasoning before sending to client (useful for server-side debugging)
-    const { internal_reasoning, ...clientResponse } = parsed;
+    // Validate and extract structured data from the JSON envelope
+    const message = parsed.message || "";
+    const observation = parsed.observation?.text ? parsed.observation : null;
+    // Accept closing if it's any truthy object (reason field preferred but not required)
+    const closing =
+      parsed.closing && typeof parsed.closing === "object"
+        ? parsed.closing
+        : null;
 
-    // Ensure required fields exist — handle both diagnostic and audit response shapes
     const result = {
-      message: clientResponse.message || "",
-      observation: clientResponse.observation || null,
-      state_update: clientResponse.state_update || {},
-      // Diagnostic fields
-      ready_for_diagnosis: clientResponse.ready_for_diagnosis || false,
-      diagnosis: clientResponse.diagnosis || clientResponse.state_update?.diagnosis || null,
-      // Audit fields
-      ready_for_analysis: clientResponse.ready_for_analysis || false,
-      audit_result: clientResponse.audit_result || null,
+      message,
+      observation,
+      closing,
+      _raw_content: response.content,
     };
 
-    // Log this turn to Supabase (awaited — serverless functions terminate after response)
-    const lastUserMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+    // Log to Supabase
+    const turnNumber = (rawHistory || []).filter(
+      (e) => e.role === "user"
+    ).length;
     await logTurn({
       sessionId: sessionId || "unknown",
-      mode,
-      turnNumber: state.conversation_turn || 0,
-      userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
-      aiResponse: result.message,
-      observation: result.observation,
-      state,
-      diagnosis: result.diagnosis || result.audit_result || null,
-      completed: result.ready_for_diagnosis || result.ready_for_analysis || false,
+      mode: "intake",
+      turnNumber,
+      userMessage: userMessage || "[opening]",
+      aiResponse: message,
+      observation: observation?.text || null,
+      state: { reasoning },
+      diagnosis: null,
+      completed: !!closing,
     });
 
     return res.status(200).json(result);
   } catch (err) {
     console.error("Diagnostic API error:", err);
 
-    // Log the error to Supabase so we can track failure rates
-    const { messages: msgs = [], state: errState = {}, mode: errMode = "generic", sessionId: errSessionId } = req.body || {};
-    const lastUserMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    // Log error to Supabase
+    const { sessionId, rawHistory = [] } = req.body || {};
     await logError({
-      sessionId: errSessionId || "unknown",
-      mode: errMode,
-      turnNumber: errState.conversation_turn || 0,
-      errorType: err.status === 401 ? "invalid_api_key"
-        : err.status === 429 ? "rate_limited"
-        : err.status ? `anthropic_error_${err.status}`
-        : "unhandled_exception",
+      sessionId: sessionId || "unknown",
+      mode: "intake",
+      turnNumber: (rawHistory || []).filter((e) => e.role === "user").length,
+      errorType:
+        err.status === 401
+          ? "invalid_api_key"
+          : err.status === 429
+            ? "rate_limited"
+            : err.status
+              ? `anthropic_error_${err.status}`
+              : "unhandled_exception",
       rawResponse: (err.message || "").slice(0, 2000),
-      userMessage: lastUserMsg?.role === "user" ? lastUserMsg.content : null,
+      userMessage: null,
     });
 
-    // Handle specific Anthropic errors
     if (err.status === 401) {
       return res.status(500).json({ error: "Invalid API key" });
     }
     if (err.status === 429) {
-      return res.status(429).json({ error: "Rate limited — please wait a moment and try again" });
+      return res
+        .status(429)
+        .json({ error: "Rate limited — please wait a moment and try again" });
     }
-
-    return res.status(500).json({ error: "Something went wrong. Please try again." });
+    return res
+      .status(500)
+      .json({ error: "Something went wrong. Please try again." });
   }
 }

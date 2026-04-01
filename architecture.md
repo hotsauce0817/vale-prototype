@@ -8,29 +8,29 @@ A living reference for how Vale is built. Updated as the system evolves.
 
 ## System Overview
 
-Vale's prototype is a diagnostic intake conversation — an AI that talks to a user, builds a picture of their financial life across five domains, surfaces cross-domain interactions they didn't know they had, and generates a structured diagnosis.
+Vale's prototype is a 3-act experience: a full-screen diagnostic conversation → a reveal transition → a home screen that feels like a letter from your CFO. The AI talks to the user, surfaces cross-domain interactions across five financial domains, and generates a scored home screen with briefing cards and work items.
 
 **Data flow:**
 
 ```
 User (browser)
-  → App.jsx (state machine — routes between screens based on phase)
-    → LiveIntake screen (conversation UI)
-      → useDiagnosticChat hook (manages conversation state, API calls, state merging)
+  → App.jsx (4-phase router: select → intake → transition → home)
+    → LiveIntake screen (full-screen chat with observation strip)
+      → useDiagnosticChat hook (chat state, observations, API calls)
         → POST /api/diagnostic (Vercel serverless function)
-          → buildSystemPrompt() (constructs mode-specific prompt + injects current state)
-            → Claude Sonnet API (generates JSON response: message + observation + state_update + diagnosis)
-          ← JSON response parsed, internal_reasoning stripped
-        ← State merged into diagnostic state, messages rendered
-      ← Conversation continues until ready_for_diagnosis = true
-    → IntakeRecap screen (displays diagnosis)
+          → Claude Sonnet API with extended thinking (single API call, no tool-use loop)
+            → thinking block: internal analysis (patterns, cross-domain connections)
+            → text block: JSON envelope { message, observation, closing }
+          ← Parse JSON envelope
+        ← { message, observation, closing, _raw_content }
+      ← Observations accumulate in strip + appear as inline cards
+    → DiagnosisTransition ("Building your picture..." + /api/diagnosis call)
+    → ValeHome (score ring, net worth, briefing cards, work items)
 ```
 
-**Two conversation paths:**
-1. **Rinka demo** — Pre-scripted user responses from a real customer interview. Demonstrates the product with a known-good conversation arc. The AI responds live; the user picks from preset choices.
-2. **Open intake** — Free-text conversation. Three entry contexts: equity event, home purchase, or generic (cold start with score question).
+**Single conversation path:** Free-text intake conversation. Opens with a 1-10 scale question ("How in control do you feel of your financial life?"), followed by a "+2" follow-up that serves as the primary domain triage signal. The AI uses the +2 answer to decide which domain to probe first.
 
-**The core protocol:** Every API call sends `{ messages, state, mode }`. Claude returns `{ message, observation, state_update, ready_for_diagnosis, diagnosis }`. The frontend deep-merges `state_update` into the running diagnostic state, accumulating signals across turns. When `ready_for_diagnosis` is true and a `diagnosis` object is present, the UI transitions to the recap screen.
+**The core protocol:** Every API call sends `{ rawHistory, userMessage, sessionId }`. The API reconstructs Claude-compatible messages (preserving thinking blocks), calls Claude with extended thinking in a single API call, and parses the JSON envelope from the text response. Returns `{ message, observation, closing, _raw_content }`. The frontend stores `_raw_content` (full content array including thinking blocks) in rawHistory for the next turn. Observations include a `summary` field for the persistent strip at the top of the conversation.
 
 ---
 
@@ -39,31 +39,39 @@ User (browser)
 Architectural choices we made and why — so we remember the reasoning later.
 
 ### 2026-02 — Start with a static frontend prototype
-**Decision:** Build the initial prototype as a static frontend (HTML/JS/CSS with Vite) before adding backend services.
-**Why:** Lets us validate the product concept, UX flow, and messaging with real users before investing in backend complexity. We can add APIs, databases, and auth later without throwing away the frontend work.
+**Decision:** Build the initial prototype as a static frontend (React/Vite) before adding backend services.
+**Why:** Lets us validate the product concept, UX flow, and messaging with real users before investing in backend complexity.
 
-### 2026-02 — Vale's AI Session Architecture
+### 2026-03 — JSON envelope + extended thinking (reverted from tool calling)
+**Decision:** Revert from native tool calling back to JSON envelope responses, combined with extended thinking for structural separation.
+**Why:** Tool calling tripled latency (5-8s → 15-23s per turn) due to the tool-use loop requiring 2-3 API round-trips per turn. For a 5-minute conversion experience across 12-15 turns, this was unacceptable. The original JSON envelope had fragile parsing because `internal_reasoning` as free-form text broke `JSON.parse`. Extended thinking solves this — analysis moves into a native `thinking` block, so the JSON only contains structured data fields (`message`, `map_updates`, `observation`, `closing`). Single API call, ~5-8s latency, same quality, simpler code.
+
+### 2026-03 — Separate diagnosis endpoint
+**Decision:** Split diagnosis generation into its own API endpoint (`/api/diagnosis`) rather than handling it in the intake conversation.
+**Why:** The intake conversation and diagnosis generation have fundamentally different prompt requirements. The intake is conversational and progressive. The diagnosis is analytical — it takes the full transcript and generates structured findings. Separating them keeps each prompt focused and allows the frontend to run the diagnosis call in parallel with a transition animation.
+
+### 2026-03 — 1-10 Scale opening (not open-ended)
+**Decision:** Open with "On a scale of 1 to 10, how in control do you feel of your financial life?" followed by a "+2" follow-up.
+**Why:** Three benefits: (1) Triage signal — a "3" is a completely different conversation than an "8". (2) Gap reveal — the +2 follow-up shows what the user *thinks* their gap is, which is often different from the actual gap. That delta drives the best observations. (3) Trackable metric — the score is a baseline that can be compared over time.
+
+### 2026-02 — Vale's AI Session Architecture (future)
 **Decision:** Three-layer session design — each layer uses a different type of prompt, but all share the same persistent user profile.
 
 **The three layers:**
 
-1. **Intake session** — Runs on a general advisor prompt. Goal: build the user's financial profile and detect their highest-urgency situation. The AI asks smart questions, builds rapport, and extracts structured data. The application layer watches for urgency signals in the background. When it detects a high-urgency event with enough parameters, it surfaces a card: "It looks like your equity situation is time-sensitive — want to go deeper?" User taps yes → specialized session loads with everything already known. The intake never feels like a form. It feels like talking to an advisor who gets smarter as the conversation goes on.
+1. **Intake session** — Runs on a general advisor prompt. Goal: build the user's financial profile and detect their highest-urgency situation. The AI asks smart questions, builds rapport, and extracts structured data.
 
-2. **Task/card sessions** — Specialized prompts per domain (equity, tax, investing, etc.), loaded with the user's stored profile. The navigation menu IS the router — user taps "tax optimization," the tax system prompt loads. These are the deeply built, testable, auditable flows where the quality bar is highest. Each domain has its own prompt, decision trees, guardrails, and eval test cases.
+2. **Task/card sessions** — Specialized prompts per domain (equity, tax, investing, etc.), loaded with the user's stored profile. These are the deeply built, testable, auditable flows where the quality bar is highest.
 
-3. **General/home session** — Hybrid concierge prompt for open-ended questions. When someone types "should I put more into my 401k?" (which touches tax, investing, and cash flow), this prompt recognizes the shape of the question and either handles it broadly or triages to a specialized session. Think: the AI concierge who knows when to hand you to a specialist.
+3. **General/home session** — Hybrid concierge prompt for open-ended questions. Recognizes the shape of the question and either handles it broadly or triages to a specialized session.
 
 **Key design principles:**
-- **Profile is persistent, prompts are session-specific.** The stored financial profile (income, accounts, equity, family, prior decisions) gets injected into every system prompt. Prompts are different per domain; the profile is always the same.
-- **Each session is a fresh API call.** Conversation history handles within-session memory automatically. You don't build anything — it's how the API works.
-- **Session summaries keep the profile alive.** At the end of each session, a quick summarization call extracts decisions made, open questions, and new facts — then appends them to the profile. Lightweight and cheap.
-- **Link-based routing skips triage.** A URL like `vale.com/start?event=equity` pre-selects the domain before a word is typed. You load the equity prompt immediately and open three steps deeper than generic intake.
-- **Build routing plumbing from day one.** Even with only 2 life events at launch, build the intake so it outputs a route. When life event #3 is ready, you add a new prompt and a new route — not a refactor.
+- **Profile is persistent, prompts are session-specific.** The stored financial profile gets injected into every system prompt.
+- **Session summaries keep the profile alive.** At the end of each session, a summarization call extracts decisions made, open questions, and new facts.
+- **Link-based routing skips triage.** A URL like `vale.com/start?event=equity` pre-selects the domain before a word is typed.
 
 ### 2026-02 — AI Function Ownership Matrix
 **Decision:** Map AI engineering scope to roles for hiring and team structure.
-
-This matters because the AI stack has distinct functions that require different expertise. The PM (Sahil) should own eval frameworks and prompt engineering alongside the AI engineer — these are the most product-facing parts of the stack. The CFP is critical for defining what "correct" looks like and where the compliance boundaries are.
 
 | Function | AI Engineer | PM | CFP |
 |---|---|---|---|
@@ -74,19 +82,18 @@ This matters because the AI stack has distinct functions that require different 
 | Reasoning Chains | Makes them work | Designs the steps | Validates the logic |
 | Guardrails | Implements | Defines product rules | Defines compliance rules |
 
-**Implication for hiring:** The first AI engineer (beyond Kuan-Ying) needs to own LLM architecture and RAG. Prompt engineering and evals can be PM-driven initially — especially for an AI-native PM. The CFP is indispensable for evals and guardrails from day one.
-
 ---
 
 ## Current Implementation
 
-What exists today. ~1,700 lines of custom code total.
+What exists today.
 
 ### Stack
 - **Frontend:** React 18, Vite 5, no CSS framework (inline styles with design tokens)
-- **Backend:** Single Vercel serverless function calling Claude Sonnet via Anthropic SDK
+- **Backend:** Vercel serverless functions calling Claude Sonnet via Anthropic SDK (JSON envelope + extended thinking)
+- **Logging:** Supabase (session turns + errors)
 - **Dependencies:** `react`, `react-dom`, `@anthropic-ai/sdk` — that's it
-- **No:** TypeScript, tests, CI/CD, database, auth, state library, CSS framework
+- **No:** TypeScript, tests, CI/CD, auth, state library, CSS framework
 
 ### File Map
 
@@ -94,71 +101,92 @@ What exists today. ~1,700 lines of custom code total.
 
 | File | What it does |
 |---|---|
-| `App.jsx` | State machine. 5 state variables (`phase`, `profileKey`, `flowMode`, `entryContext`, `diagnosis`) control which screen renders. Phases: select → intake → recap → modes → return → human. |
-| `hooks/useDiagnosticChat.js` | **Core complexity lives here.** Custom hook managing: display messages (what user sees), API messages (role/content pairs for Claude via `useRef`), diagnostic state (accumulated across turns), and diagnosis extraction. Includes deep merge logic with array dedup for signals/key_facts. |
-| `screens/LiveIntake.jsx` | Conversation UI for both Rinka demo and open intake. Renders messages, observations, loading states. Calls `useDiagnosticChat` hook. |
-| `screens/EntrySelect.jsx` | Landing screen. Three paths: Rinka demo, equity event, home purchase. |
-| `screens/IntakeRecap.jsx` | Displays diagnosis — either from AI (diagnosis object) or hardcoded profiles. |
-| `screens/DiagnosticIntake.jsx` | Hardcoded profile flow (dev mode only). Pre-scripted intake with canned responses. |
-| `screens/ModeExplorer.jsx` | Post-diagnosis: shows Vale vs. Vale+ tiers. Hardcoded profiles only. |
-| `screens/ReturnExperience.jsx` | Simulates returning user experience. Hardcoded profiles only. |
-| `screens/HumanHandoff.jsx` | CFP handoff stub. Hardcoded profiles only. |
-| `tokens.js` | Design system: colors, typography, spacing, border radius. All styles reference `T.` |
-| `data/profiles.js` | Three hardcoded demo profiles (Maya, Arun, Vikram) with full intake/diagnosis data. |
-| `data/rinka.js` | Pre-scripted Rinka responses array. Each entry has display text + choice options. |
-| `components/shared.jsx` | Reusable UI primitives: `Btn`, `Card`, `FadeIn`, `Badge`, etc. |
+| `App.jsx` | 4-phase router: `select → intake → transition → home`. Controls which screen renders based on phase state. |
+| `hooks/useDiagnosticChat.js` | Custom hook managing: display messages, raw conversation history (via `useRef`), observations (with summaries for the strip), and closing signal. |
+| `screens/EntrySelect.jsx` | Landing page with single CTA ("Start your diagnostic"). |
+| `screens/LiveIntake.jsx` | Full-screen chat with observation strip. Strip appears at top when first observation fires, accumulates one-line summaries. Observation cards also appear inline above AI messages. |
+| `screens/DiagnosisTransition.jsx` | "Building your picture..." loading state. Calls `/api/diagnosis` (home screen generation) in parallel. |
+| `screens/ValeHome.jsx` | The home screen. Score ring, net worth, mirror line, open door, briefing cards (prose), work items with points. Feels like a letter from your CFO. |
+| `tokens.js` | Design system: colors, typography, spacing. All styles reference `T.` |
+| `components/shared.jsx` | Reusable UI primitives: `FadeIn`, `Badge`, `Btn`, `Card`, `TopBar`, `ObservationMarker`. |
 
 **Backend — `prototype/api/`**
 
 | File | What it does |
 |---|---|
-| `diagnostic.js` | POST endpoint. Receives `{ messages, state, mode }`, builds system prompt, calls Claude Sonnet (2048 max tokens), parses JSON response with 3-layer fallback (direct parse → regex extract → retry with stronger instruction), strips `internal_reasoning`, returns normalized response. |
-| `_lib/systemPrompt.js` | **This is the product logic.** 334 lines. Defines Vale's identity, the 5 financial domains with cross-domain interactions, observation criteria, conversation strategy, JSON response format, and diagnosis generation rules. Mode-specific contexts appended: Rinka (focused on equity/tax/investing), Life Event (score → +2 → deep diagnosis), Generic (cold start with score question). Current diagnostic state injected as JSON at the end. |
+| `diagnostic.js` | POST endpoint for intake conversation. Reconstructs Claude-compatible messages from rawHistory (preserving thinking blocks), calls Claude with extended thinking in a single API call, parses JSON envelope from text response. Returns `{ message, observation, closing, _raw_content }`. |
+| `diagnosis.js` | POST endpoint for home screen generation. Takes full conversation data, formats transcript, calls Claude with home screen prompt, returns structured JSON (score, balance sheet, briefing items, work items). |
+| `_lib/systemPrompt.js` | **This is the product logic.** Defines Vale's identity, the 5 financial domains (Cash Flow, Investing, Taxes, Estate Planning, Insurance) with cross-domain interactions, observation quality criteria, the 1-10 scale opening, domain triage, and conversation strategy. |
+| `_lib/homePrompt.js` | Home screen generation prompt. Defines the output schema (score, balance sheet, briefing, work items) with quality standards and a gold-standard example. |
+| `_lib/log.js` | Supabase logging utilities (logTurn, logError). |
 
-### Diagnostic State Shape
+### Response Architecture (JSON Envelope + Extended Thinking)
 
-The state object that accumulates across the conversation:
+Claude responds with **extended thinking** + a **JSON envelope** in the text block:
 
-```
+**Extended thinking** (`thinking: { type: "enabled", budget_tokens: 1024 }`) — Claude's internal analysis happens within the same API call, producing a `thinking` block before the text response. This is where all diagnostic reasoning goes: patterns, cross-domain connections, domain tracking, what to probe next. The thinking block is logged server-side for debugging but never shown to the user.
+
+**JSON envelope** — The text response is a single JSON object:
+```json
 {
-  user: { name, household, life_stage, hhi_range, state_of_residence, dependents, score },
-  entry_path: "rinka" | "life_event" | "generic",
-  life_event: "equity_event" | "home_purchase" | null,
-  domains: {
-    investing: {
-      explored, gap_severity,
-      layers: {                          ← only investing has sub-layers
-        cash_flow: { explored, gap_severity, signals[], key_facts[] },
-        savings:   { explored, gap_severity, signals[], key_facts[] },
-        portfolio: { explored, gap_severity, signals[], key_facts[] }
-      },
-      signals[], key_facts[]
-    },
-    tax:        { explored, gap_severity, signals[], key_facts[] },
-    retirement: { explored, gap_severity, signals[], key_facts[] },
-    estate:     { explored, gap_severity, signals[], key_facts[] },
-    insurance:  { explored, gap_severity, signals[], key_facts[] }
-  },
-  observations[],
-  cross_domain_interactions_detected[],
-  conversation_turn: number,
-  ready_for_diagnosis: boolean
+  "message": "Conversational text shown to user",
+  "observation": null | { "text": "...", "summary": "...", "domains": [...], "quality_criteria_met": [...] },
+  "closing": null | { "reason": "...", "domains_explored": [...], "observation_count": N }
 }
 ```
 
+- **`message`** — The conversation. Short, punchy, one question at a time.
+- **`observation`** — Null most turns. Surfaces a key insight as a highlighted card + one-line summary for the observation strip. Must meet 2 of 3 quality criteria. 2-3 per intake.
+- **`closing`** — Null until intake ends. Signals conversation should close.
+
+**Why this architecture:** Extended thinking provides the structural separation between analysis and conversation (thinking ≠ text). The JSON envelope provides structured data in a single API call (~5-8s). Tool calling required 2-3 round-trips per turn (~15-23s) — unacceptable for real-time conversation. See lessons.md for the full migration story.
+
+### Observation Strip
+
+The observation strip is a persistent element at the top of the chat that appears when the first observation fires. It accumulates one-line summaries (from the `summary` field) of each observation. Think of it as a sticky note the advisor is jotting on — visually quiet, warm gold accent, minimal chrome.
+
+Observations also appear as gold ✦ OBSERVATION cards inline in the chat (showing the full `text`), so users see both a summary in the strip and the detailed insight in context.
+
+### Home Screen Architecture
+
+After the conversation ends, `/api/diagnosis` generates structured JSON for the home screen:
+- **Score** (0-100): Weighted assessment across 5 domains, reflecting how organized/protected the financial life is — not how wealthy
+- **Balance sheet**: Assets, liabilities, net worth, monthly cash flow
+- **Mirror line**: One sentence connecting the user's self-assessment to Vale's
+- **Briefing items** (3): Prose cards with specific details from the conversation, each with a CTA
+- **Work items** (4-6): Ordered by impact, points sum to ~(100 - score)
+
+The home screen component (`ValeHome.jsx`) uses staggered animations: score ring animates up from 0, then elements appear one by one.
+
+### Message Reconstruction
+
+`reconstructMessages()` walks rawHistory and passes entries through directly (no transformation needed — thinking blocks are preserved as-is per Anthropic API requirements). Always prepends "Begin the diagnostic intake conversation." as the synthetic opening message.
+
+### Domain Taxonomy
+- `cash_flow` — Income, burn rate, emergency fund, debt, savings rate
+- `investing` — Portfolio, 401(k), brokerage, allocation, equity compensation (ISOs, RSUs, exercise strategy)
+- `taxes` — Tax optimization, AMT, estimated payments, brackets, withholding
+- `estate_planning` — Wills, trusts, guardianship, beneficiaries, POA
+- `insurance` — Life, disability, umbrella, coverage adequacy
+
+Note: Equity compensation lives within Investing (not its own domain). Estate Planning and Insurance are separate domains (not bundled as "Protection") because they involve different professionals, timelines, and work items.
+
+### Design System
+- Background: #FAF8F5 (warm cream)
+- Accent: #8B7D3C (warm gold)
+- Serif: Source Serif 4 (headlines, briefing prose)
+- Sans: DM Sans (body, UI, labels)
+- Status colors: green (#3D7A52) good/ready, amber (#9B7B2F) warning/in-progress, red (#B84233) urgent/negative
+
 ### Known Prototype Debt
 
-These are intentional trade-offs at prototype stage, not oversights:
+Intentional trade-offs at prototype stage:
 
-- **No types.** No TypeScript. State shapes are implicit, enforced by convention and the system prompt's JSON format spec.
-- **No tests.** The deep merge logic (`mergeState`, `mergeDomain`, `mergeArrayUnique`) does real work and should be tested. The JSON parsing fallback chain in `diagnostic.js` should also be tested.
-- **JSON parsing is fragile.** Claude sometimes wraps JSON in markdown fences or includes text outside the JSON object. `diagnostic.js` has a 3-layer fallback: direct parse → regex extraction → full retry with stronger instruction. Works but is prototype scaffolding.
-- **`ready_for_diagnosis` without diagnosis.** Edge case where Claude sets the flag but doesn't include the diagnosis object. The hook handles it with a retry call (line 216-231 of `useDiagnosticChat.js`), but it's a band-aid.
-- **No session persistence.** Conversation is lost on page reload. State lives in React `useState`/`useRef` only.
-- **Screen routing won't scale.** `App.jsx` uses if/else chains on a `phase` string. Fine for 7 screens, not for 20+.
-- **Claude sometimes uses wrong domain key.** The merge logic normalizes `investment_coordination` → `investing` (line 96-98 of `useDiagnosticChat.js`) because Claude occasionally deviates from the schema.
-- **Inline styles everywhere.** All styling via `T.` tokens and inline style objects. Clean and consistent, but no CSS framework or component library.
-- **Dev mode feature flag.** `?dev` query param switches to hardcoded profile flow. Not a proper feature flag system.
+- **No types.** No TypeScript. State shapes enforced by convention and tool definitions.
+- **No tests.** Tool calling loop and message reconstruction should be tested.
+- **No session persistence.** Conversation lost on page reload. State lives in React `useState`/`useRef` only.
+- **Screen routing won't scale.** `App.jsx` uses if/else chains on a `phase` string. Fine for 4 screens, not for 20+.
+- **Inline styles everywhere.** All styling via `T.` tokens and inline style objects. Clean and consistent, but no CSS framework.
 
 ---
 
